@@ -1,0 +1,23 @@
+#!/usr/bin/env boot
+;;-*- mode: Clojure; -*-
+
+;; This requires Boot.
+;; > brew install boot-clj
+
+(def projects ["voter-registration-works"
+               "voter-registration-http-api" "election-works" "user-works"
+               "user-http-api" "election-authority-works" "electorate-works"
+               "address-works" "election-notification-http-api"
+               "election-notification-works" "notification-works"
+               "turbovote-web"
+               "scheduled-message-works" "email-works" "sms-works" "krakenstein"])
+
+(defmacro dopar [bindings body]
+  `(let [procs# (doall (for ~bindings (future ~body)))]
+     (doseq [p# procs#] (deref p#))))
+
+(defn -main []
+  ;; let's build it in parallel
+  (dopar [project projects]
+         (let [munged (clojure.string/replace project "-" "")]
+           (clojure.java.shell/sh "docker-compose" "build" munged))))

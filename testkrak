@@ -1,0 +1,9 @@
+#!/bin/bash
+
+PROJECTS=("voter-registration-works" "voter-registration-http-api" "election-works" "user-works" "user-http-api" "election-authority-works" "electorate-works" "address-works" "election-notification-http-api" "election-notification-works" "notification-works" "turbovote-web" "scheduled-message-works" "email-works" "sms-works" "krakenstein")
+
+for p in ${PROJECTS[@]}; do
+    cd $p
+    lein test
+    cd -
+done

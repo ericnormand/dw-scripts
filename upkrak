@@ -1,0 +1,20 @@
+#!/usr/bin/env boot
+;;-*- mode: Clojure; -*-
+
+;; This requires Boot.
+;; > brew install boot-clj
+
+(def projects ["voter-registration-works"
+               "voter-registration-http-api" "election-works" "user-works"
+               "user-http-api" "election-authority-works" "electorate-works"
+               "address-works" "election-notification-http-api"
+               "election-notification-works" "notification-works"
+               "turbovote-web"
+               "scheduled-message-works" "email-works" "sms-works" "krakenstein"])
+
+(defn -main []
+  (doseq [project projects]
+    (clojure.java.shell/with-sh-dir (clojure.java.io/file project)
+      (prn (clojure.java.shell/sh "git" "checkout" "master"))
+      (prn (clojure.java.shell/sh "git" "pull")))))
+ 
