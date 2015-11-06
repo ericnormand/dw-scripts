@@ -4,6 +4,11 @@
 ;; This requires Boot.
 ;; > brew install boot-clj
 
+(set-env!
+ :dependencies '[[org.clojure/tools.logging "0.3.1"]])
+
+(require '[clojure.tools.logging :as log])
+
 (def projects ["voter-registration-works"
                "voter-registration-http-api" "election-works" "user-works"
                "user-http-api" "election-authority-works" "electorate-works"
@@ -18,6 +23,8 @@
 
 (defn -main []
   ;; let's build it in parallel
+  (clojure.java.shell/sh "docker" "start" "artifactory")
+  (Thread/sleep 60000) ;; wait for artifactory to start
   (dopar [project projects]
          (let [munged (clojure.string/replace project "-" "")]
-           (clojure.java.shell/sh "docker-compose" "build" munged))))
+           (log/info (clojure.java.shell/sh "docker-compose" "build" munged)))))

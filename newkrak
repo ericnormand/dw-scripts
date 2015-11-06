@@ -6,8 +6,10 @@
 
 (set-env! :dependencies '[])
 (require '[clojure.edn :as edn])
+(require '[clojure.string :as string])
 (require '[clojure.walk :as walk])
 (require '[clojure.pprint :refer [pprint]])
+(require '[clojure.java.io :as io])
 
 (def projects ["voter-registration-works"
                "voter-registration-http-api" "election-works" "user-works"
@@ -17,43 +19,58 @@
                "turbovote-web"
                "scheduled-message-works" "email-works" "sms-works" "krakenstein"])
 
+(defmacro dopar [bindings & body]
+  `(let [procs# (doall (for ~bindings (future (do ~@body))))]
+     (doseq [p# procs#] (deref p#))))
+
+(defn fetch-repo [dir project]
+  (clojure.java.shell/with-sh-dir dir
+    (clojure.java.shell/sh "git" "clone" (str "git@github.com:democracyworks/" project ".git"))))
+
+(defn setup-profiles [dir project]
+  (let [pf (io/file dir project "profiles.clj.sample")]
+    (when (.exists pf)
+      (with-open [rdr (java.io.PushbackReader. (io/reader pf))]
+        (let [new-prof (-> (read rdr)
+                           (assoc-in [:dev-overrides :repositories "my.datomic.com" :username] (System/getenv "DATOMIC_USERNAME"))
+                           (assoc-in [:dev-overrides :repositories "my.datomic.com" :password]  (System/getenv "DATOMIC_PASSWORD")))]
+          (spit (io/file dir project "profiles.clj")
+                (with-out-str (pprint new-prof))))))))
+
+(defn setup-mirrors [dir project]
+  (let [pr (io/file dir project "project.clj")
+        ip (-> "localdocker"
+               java.net.InetAddress/getByName
+               .getHostAddress)]
+    (with-open [rdr (java.io.PushbackReader. (io/reader pr))]
+      (let [new-proj (concat
+                      (read rdr)
+                      [:mirrors {#"clojars" {:name "Artifactory Clojars"
+                                             :url (str "http://" ip ":7878/artifactory/clojars")}
+                                 #"central" {:name "Artifactory Central"
+                                             :url (str "http://" ip ":7878/artifactory/maven-central")}}])]
+        (spit pr (with-out-str (pprint new-proj)))))))
+
+(defn cleanup-dockerfile [dir project]
+  (let [df (io/file dir project "Dockerfile")]
+    (with-open [bf (io/reader df)]
+      (let [lines (line-seq bf)
+            new-lines (->> lines
+                           (remove (partial re-find #"lein deps"))
+                           (remove (partial re-find #"no-code-just-deps"))
+                           (remove (partial re-find #"lein test"))
+                           (map #(string/replace % #"^RUN lein" "RUN lein do deps,")))]
+        (spit df (clojure.string/join "\n" new-lines))))))
+
 (defn -main [dir]
   (assert (System/getenv "DATOMIC_USERNAME"))
   (assert (System/getenv "DATOMIC_PASSWORD"))
-  (doto (java.io.File. dir)
-    (.mkdir))
-  (clojure.java.shell/with-sh-dir dir
-    (let [procs (doall (for [project projects]
-                         (future (clojure.java.shell/sh "git" "clone" (str "git@github.com:democracyworks/" project ".git")))))]
-      (doseq [p procs]
-        @p)))
-  (doseq [project projects]
-    (let [ip (-> "localdocker"
-                 java.net.InetAddress/getByName
-                 .getHostAddress)
-          pf (clojure.java.io/file dir project "profiles.clj.sample")
-          pr (clojure.java.io/file dir project "project.clj")]
-      (when (.exists pf)
-        (let [prof (edn/read (java.io.PushbackReader. (clojure.java.io/reader pf)))
-              new-prof (-> prof
-                           (assoc-in [:dev-overrides :repositories "my.datomic.com" :username] (System/getenv "DATOMIC_USERNAME"))
-                           (assoc-in [:dev-overrides :repositories "my.datomic.com" :password]  (System/getenv "DATOMIC_PASSWORD")))]
-          (spit (clojure.java.io/file dir project "profiles.clj")
-                (with-out-str (pprint new-prof)))))
-      (let [proj (edn/read (java.io.PushbackReader. (clojure.java.io/reader pr)))
-            new-proj (concat
-                      proj
-                      [:mirrors {#"clojars" {:name "Artifactory Clojars"
-                                             :url (str "http://" ip ":8080/artifactory/clojars")}
-                                 #"central" {:name "Artifactory Central"
-                                             :url (str "http://" ip ":8080/artifactory/maven-central")}}])]
-        (spit pr (with-out-str (pprint new-proj))))
-      (let [df (clojure.java.io/file dir project "Dockerfile")]
-        (with-open [bf (clojure.java.io/reader df)]
-          (let [lines (line-seq bf)
-                new-lines (->> lines
-                               (remove (partial re-find #"lein deps"))
-                               (remove (partial re-find #"no-code-just-deps"))
-                               (remove (partial re-find #"lein test")))]
-            (spit df (clojure.string/join "\n" new-lines))))))))
 
+  (let [dir (java.io.File. dir)]
+    (.mkdir dir)
+
+    (dopar [project projects]
+           (fetch-repo dir project)
+           (setup-profiles dir project)
+           (setup-mirrors dir project)
+           (cleanup-dockerfile dir project))))
