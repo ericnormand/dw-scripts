@@ -4,17 +4,49 @@
 ;; This requires Boot.
 ;; > brew install boot-clj
 
-(def projects ["voter-registration-works"
-               "voter-registration-http-api" "election-works" "user-works"
-               "user-http-api" "election-authority-works" "electorate-works"
-               "address-works" "election-notification-http-api"
-               "election-notification-works" "notification-works"
-               "turbovote-web"
-               "scheduled-message-works" "email-works" "sms-works" "krakenstein"])
+(set-env! :dependencies
+          '[["clj-yaml" "0.4.0"]])
 
-(defn -main []
-  (doseq [project projects]
-    (clojure.java.shell/with-sh-dir (clojure.java.io/file project)
-      (prn (clojure.java.shell/sh "git" "checkout" "master"))
-      (prn (clojure.java.shell/sh "git" "pull")))))
+(require '[clj-yaml.core :as yaml])
+(requier '[clojure.string :as str])
+
+(def docker-compose (yaml/parse-string (slurp "docker-compose.yml")))
+
+(def projects (for [[project info] docker-compose
+                    :when (contains? info "build")]
+                project info))
+
+(defn handle-error [out]
+  (when (not (zero? (:exit out)))
+    (println (:out out))
+    (println (:err out))
+    (throw (ex-info "Non-zero error code." out))))
+
+(defn slurp-branch-fn [branches-file-name]
+  (let [text (slurp branches-file-name)
+        mp (into {}
+             (for [line (str/split text #"\n")
+                   [project branch] (str/split line #"\s+")]
+               [(str/trim project) (str/trim branch)]))]
+    (fn [p]
+      (let [b (get mp p)]
+        (cond
+          (= ":exclude" b)
+          nil
+
+          (nil? b)
+          "master"
+
+          :else
+          b)))))
+
+(defn -main [& [branches]]
+  (let [branch-fn (if branches
+                    (slurp-branch-fn branches)
+                    (constantly "master"))]
+    (doseq [[project info] projects]
+      (when (branch-fn project)
+        (clojure.java.shell/with-sh-dir (clojure.java.io/file (get info "build"))
+          (handle-error (clojure.java.shell/sh "git" "checkout" (branch-fn project)))
+          (handle-error (clojure.java.shell/sh "git" "pull")))))))
  
